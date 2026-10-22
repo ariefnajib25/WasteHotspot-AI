@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
+
 import '../data/report_store.dart';
 
 class ProgressPage extends StatefulWidget {
   final bool hasNewReport;
 
-  const ProgressPage({
-    super.key,
-    required this.hasNewReport,
-  });
+  const ProgressPage({super.key, required this.hasNewReport});
 
   @override
   State<ProgressPage> createState() => _ProgressPageState();
@@ -19,7 +17,8 @@ class _ProgressPageState extends State<ProgressPage> {
   // ==========================================================
 
   bool get zoneDExists {
-    return ReportStore.zoneDVisibleToResidents;
+    return ReportStore.zoneDVisibleToResidents &&
+        ReportStore.currentUserAlreadyReportedZoneD;
   }
 
   bool get isResolved {
@@ -55,19 +54,12 @@ class _ProgressPageState extends State<ProgressPage> {
   // ==========================================================
 
   int get myActiveReports {
-    // Current prototype starts with 2 active reports.
     const int existingActiveReports = 1;
 
     int active =
         existingActiveReports +
-        ReportStore.validReports;
-
-    // Once Zone D is resolved,
-    // remove it from Active Reports.
-    if (ReportStore.zoneDResolved &&
-        currentUserHasZoneDReport) {
-      active--;
-    }
+        ReportStore.validReports -
+        ReportStore.completedReports;
 
     if (active < 0) {
       return 0;
@@ -77,15 +69,9 @@ class _ProgressPageState extends State<ProgressPage> {
   }
 
   int get myCompletedReports {
-    // Current prototype already contains 1 completed report.
     const int existingCompletedReports = 1;
 
-    if (ReportStore.zoneDResolved &&
-        currentUserHasZoneDReport) {
-      return existingCompletedReports + 1;
-    }
-
-    return existingCompletedReports;
+    return existingCompletedReports + ReportStore.completedReports;
   }
 
   // ==========================================================
@@ -179,10 +165,7 @@ class _ProgressPageState extends State<ProgressPage> {
           backgroundColor: Colors.orange,
           content: Row(
             children: [
-              Icon(
-                Icons.notifications_active,
-                color: Colors.white,
-              ),
+              Icon(Icons.notifications_active, color: Colors.white),
               SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -194,21 +177,16 @@ class _ProgressPageState extends State<ProgressPage> {
         ),
       );
     }
-
     // ========================================================
     // DAY 3+
     // ========================================================
-
     else if (ReportStore.zoneDUnresolvedDays >= 3) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           backgroundColor: Color(0xFF8B0000),
           content: Row(
             children: [
-              Icon(
-                Icons.warning_amber,
-                color: Colors.white,
-              ),
+              Icon(Icons.warning_amber, color: Colors.white),
               SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -240,16 +218,9 @@ class _ProgressPageState extends State<ProgressPage> {
         backgroundColor: Color(0xFF16875B),
         content: Row(
           children: [
-            Icon(
-              Icons.check_circle,
-              color: Colors.white,
-            ),
+            Icon(Icons.check_circle, color: Colors.white),
             SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Zone D hotspot has been resolved.',
-              ),
-            ),
+            Expanded(child: Text('Zone D hotspot has been resolved.')),
           ],
         ),
       ),
@@ -274,10 +245,7 @@ class _ProgressPageState extends State<ProgressPage> {
         backgroundColor: Color(0xFF16875B),
         content: Row(
           children: [
-            Icon(
-              Icons.schedule,
-              color: Colors.white,
-            ),
+            Icon(Icons.schedule, color: Colors.white),
             SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -301,12 +269,7 @@ class _ProgressPageState extends State<ProgressPage> {
 
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            110,
-          ),
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 110),
 
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -328,10 +291,7 @@ class _ProgressPageState extends State<ProgressPage> {
 
               const Text(
                 'Track waste reports from detection to resolution.',
-                style: TextStyle(
-                  color: Colors.grey,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: Colors.grey, fontSize: 12),
               ),
 
               const SizedBox(height: 24),
@@ -339,7 +299,6 @@ class _ProgressPageState extends State<ProgressPage> {
               // ==================================================
               // SUMMARY
               // ==================================================
-
               Row(
                 children: [
                   Expanded(
@@ -369,12 +328,9 @@ class _ProgressPageState extends State<ProgressPage> {
               // ==================================================
               // ZONE D
               // ==================================================
-
               if (zoneDExists) ...[
                 Text(
-                  isResolved
-                      ? 'Recently Resolved'
-                      : 'Active Report',
+                  isResolved ? 'Recently Resolved' : 'Active Report',
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -396,7 +352,6 @@ class _ProgressPageState extends State<ProgressPage> {
               // ==================================================
               // OTHER REPORTS
               // ==================================================
-
               const Text(
                 'Other Reports',
                 style: TextStyle(
@@ -411,7 +366,6 @@ class _ProgressPageState extends State<ProgressPage> {
               // ==================================================
               // ZONE B
               // ==================================================
-
               const StaticReportCard(
                 location: 'Community Playground, Zone B',
                 wasteType: 'Mixed Public Waste',
@@ -430,7 +384,6 @@ class _ProgressPageState extends State<ProgressPage> {
               // ==================================================
               // ZONE A
               // ==================================================
-
               const StaticReportCard(
                 location: 'Walking Track, Zone A',
                 wasteType: 'Plastic Bottles',
@@ -440,8 +393,7 @@ class _ProgressPageState extends State<ProgressPage> {
                 severity: 'LOW',
                 severityColor: Color(0xFFE1A72E),
                 actionBy: 'Clean Zone A Community',
-                extraInfo:
-                    'Resolved on 15 Oct 2026 • 12 volunteers',
+                extraInfo: 'Resolved on 15 Oct 2026 • 12 volunteers',
                 icon: Icons.check_circle,
               ),
             ],
@@ -465,16 +417,10 @@ class _ProgressPageState extends State<ProgressPage> {
         borderRadius: BorderRadius.circular(22),
 
         border: isUrgent && !isResolved
-            ? Border.all(
-                color: const Color(0xFF8B0000)
-                    .withOpacity(0.30),
-              )
+            ? Border.all(color: const Color(0xFF8B0000).withOpacity(0.30))
             : isResolved
-                ? Border.all(
-                    color: const Color(0xFF16875B)
-                        .withOpacity(0.25),
-                  )
-                : null,
+            ? Border.all(color: const Color(0xFF16875B).withOpacity(0.25))
+            : null,
 
         boxShadow: [
           BoxShadow(
@@ -505,9 +451,7 @@ class _ProgressPageState extends State<ProgressPage> {
                 ),
 
                 child: Icon(
-                  isResolved
-                      ? Icons.check_circle
-                      : Icons.delete_outline,
+                  isResolved ? Icons.check_circle : Icons.delete_outline,
                   color: priorityColor,
                   size: 28,
                 ),
@@ -531,20 +475,14 @@ class _ProgressPageState extends State<ProgressPage> {
 
                     Text(
                       'Plastic & Food Packaging',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 11,
-                      ),
+                      style: TextStyle(color: Colors.grey, fontSize: 11),
                     ),
 
                     SizedBox(height: 3),
 
                     Text(
                       '#WH-003',
-                      style: TextStyle(
-                        color: Colors.grey,
-                        fontSize: 10,
-                      ),
+                      style: TextStyle(color: Colors.grey, fontSize: 10),
                     ),
                   ],
                 ),
@@ -573,6 +511,49 @@ class _ProgressPageState extends State<ProgressPage> {
             ],
           ),
 
+          const SizedBox(height: 16),
+
+          // ======================================================
+          // REPORT PHOTO
+          // ======================================================
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: SizedBox(
+              width: double.infinity,
+              height: 190,
+              child: Image.asset(
+                'assests/images/rubbish_public.jpg',
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) {
+                  return Container(
+                    color: const Color(0xFFEAF4EE),
+                    child: const Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.image_outlined,
+                            size: 50,
+                            color: Color(0xFF16875B),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Rubbish image not found',
+                            style: TextStyle(
+                              color: Color(0xFF16875B),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+
           const SizedBox(height: 20),
 
           const Divider(),
@@ -582,7 +563,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // SEVERITY
           // ======================================================
-
           const ProgressDetailRow(
             icon: Icons.warning_amber,
             title: 'Severity',
@@ -595,7 +575,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // PRIORITY
           // ======================================================
-
           ProgressDetailRow(
             icon: Icons.priority_high,
             title: 'Priority',
@@ -608,7 +587,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // CONFIRMATIONS
           // ======================================================
-
           ProgressDetailRow(
             icon: Icons.people_outline,
             title: 'Resident Confirmations',
@@ -623,15 +601,13 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // REPORT AGE
           // ======================================================
-
           ProgressDetailRow(
             icon: Icons.schedule,
             title: 'Report Age',
             value: reportAge,
-            valueColor:
-                unresolvedDays >= 2 && !isResolved
-                    ? Colors.orange
-                    : Colors.black87,
+            valueColor: unresolvedDays >= 2 && !isResolved
+                ? Colors.orange
+                : Colors.black87,
           ),
 
           const Divider(height: 25),
@@ -639,7 +615,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // HOTSPOT STATUS
           // ======================================================
-
           ProgressDetailRow(
             icon: Icons.location_on_outlined,
             title: 'Hotspot Status',
@@ -652,7 +627,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // ACTION STATUS
           // ======================================================
-
           ProgressDetailRow(
             icon: Icons.track_changes,
             title: 'Action Status',
@@ -663,7 +637,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // MANAGEMENT ALERT
           // ======================================================
-
           if (managementAlertSent && !isResolved) ...[
             const SizedBox(height: 20),
 
@@ -680,8 +653,7 @@ class _ProgressPageState extends State<ProgressPage> {
 
                 border: Border.all(
                   color: unresolvedDays >= 3
-                      ? const Color(0xFF8B0000)
-                          .withOpacity(0.20)
+                      ? const Color(0xFF8B0000).withOpacity(0.20)
                       : Colors.orange.withOpacity(0.25),
                 ),
               ),
@@ -703,8 +675,7 @@ class _ProgressPageState extends State<ProgressPage> {
 
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           unresolvedDays >= 3
@@ -742,7 +713,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // RESOLVED BOX
           // ======================================================
-
           if (isResolved) ...[
             const SizedBox(height: 20),
 
@@ -758,18 +728,13 @@ class _ProgressPageState extends State<ProgressPage> {
               child: const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(
-                    Icons.check_circle,
-                    color: Color(0xFF16875B),
-                    size: 28,
-                  ),
+                  Icon(Icons.check_circle, color: Color(0xFF16875B), size: 28),
 
                   SizedBox(width: 12),
 
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Hotspot Resolved',
@@ -802,21 +767,16 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // TIMELINE
           // ======================================================
-
           const Text(
             'Resolution Timeline',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-            ),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
           ),
 
           const SizedBox(height: 14),
 
           const TimelineStep(
             title: 'Report Submitted',
-            subtitle:
-                'Waste hotspot detected and recorded.',
+            subtitle: 'Waste hotspot detected and recorded.',
             completed: true,
           ),
 
@@ -825,8 +785,7 @@ class _ProgressPageState extends State<ProgressPage> {
             subtitle: managementAlertSent
                 ? 'Township management has been notified.'
                 : 'Automatically triggered if unresolved for 2 days.',
-            completed:
-                managementAlertSent || isResolved,
+            completed: managementAlertSent || isResolved,
           ),
 
           TimelineStep(
@@ -861,10 +820,7 @@ class _ProgressPageState extends State<ProgressPage> {
         children: [
           const Row(
             children: [
-              Icon(
-                Icons.science_outlined,
-                color: Color(0xFF16875B),
-              ),
+              Icon(Icons.science_outlined, color: Color(0xFF16875B)),
 
               SizedBox(width: 8),
 
@@ -897,7 +853,6 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           // ACTIVE
           // ======================================================
-
           if (!isResolved)
             Row(
               children: [
@@ -906,25 +861,17 @@ class _ProgressPageState extends State<ProgressPage> {
                     onPressed: simulateNextDay,
 
                     style: ElevatedButton.styleFrom(
-                      backgroundColor:
-                          const Color(0xFF16875B),
+                      backgroundColor: const Color(0xFF16875B),
                       foregroundColor: Colors.white,
 
-                      padding:
-                          const EdgeInsets.symmetric(
-                        vertical: 13,
-                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
 
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(13),
+                        borderRadius: BorderRadius.circular(13),
                       ),
                     ),
 
-                    icon: const Icon(
-                      Icons.skip_next,
-                      size: 19,
-                    ),
+                    icon: const Icon(Icons.skip_next, size: 19),
 
                     label: const Text(
                       'Simulate Next Day',
@@ -943,28 +890,18 @@ class _ProgressPageState extends State<ProgressPage> {
                     onPressed: resolveHotspot,
 
                     style: OutlinedButton.styleFrom(
-                      foregroundColor:
-                          const Color(0xFF16875B),
+                      foregroundColor: const Color(0xFF16875B),
 
-                      padding:
-                          const EdgeInsets.symmetric(
-                        vertical: 13,
-                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 13),
 
-                      side: const BorderSide(
-                        color: Color(0xFF16875B),
-                      ),
+                      side: const BorderSide(color: Color(0xFF16875B)),
 
                       shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(13),
+                        borderRadius: BorderRadius.circular(13),
                       ),
                     ),
 
-                    icon: const Icon(
-                      Icons.check_circle_outline,
-                      size: 19,
-                    ),
+                    icon: const Icon(Icons.check_circle_outline, size: 19),
 
                     label: const Text(
                       'Mark Resolved',
@@ -977,11 +914,9 @@ class _ProgressPageState extends State<ProgressPage> {
                 ),
               ],
             )
-
           // ======================================================
           // RESOLVED
           // ======================================================
-
           else
             SizedBox(
               width: double.infinity,
@@ -990,30 +925,21 @@ class _ProgressPageState extends State<ProgressPage> {
                 onPressed: simulateTwoHoursLater,
 
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      const Color(0xFF16875B),
+                  backgroundColor: const Color(0xFF16875B),
                   foregroundColor: Colors.white,
 
-                  padding:
-                      const EdgeInsets.symmetric(
-                    vertical: 14,
-                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
 
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(13),
+                    borderRadius: BorderRadius.circular(13),
                   ),
                 ),
 
-                icon: const Icon(
-                  Icons.schedule,
-                ),
+                icon: const Icon(Icons.schedule),
 
                 label: const Text(
                   'Simulate 2 Hours Later',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -1079,11 +1005,7 @@ class SummaryCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(12),
             ),
 
-            child: Icon(
-              icon,
-              color: color,
-              size: 22,
-            ),
+            child: Icon(icon, color: color, size: 22),
           ),
 
           const SizedBox(width: 12),
@@ -1103,10 +1025,7 @@ class SummaryCard extends StatelessWidget {
 
                 Text(
                   title,
-                  style: const TextStyle(
-                    color: Colors.grey,
-                    fontSize: 10,
-                  ),
+                  style: const TextStyle(color: Colors.grey, fontSize: 10),
                 ),
               ],
             ),
@@ -1140,21 +1059,14 @@ class ProgressDetailRow extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(
-          icon,
-          color: const Color(0xFF16875B),
-          size: 20,
-        ),
+        Icon(icon, color: const Color(0xFF16875B), size: 20),
 
         const SizedBox(width: 10),
 
         Expanded(
           child: Text(
             title,
-            style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 12,
-            ),
+            style: const TextStyle(color: Colors.grey, fontSize: 12),
           ),
         ),
 
@@ -1215,16 +1127,11 @@ class TimelineStep extends StatelessWidget {
 
                 shape: BoxShape.circle,
 
-                border: Border.all(
-                  color: color,
-                  width: 2,
-                ),
+                border: Border.all(color: color, width: 2),
               ),
 
               child: Icon(
-                completed
-                    ? Icons.check
-                    : Icons.circle,
+                completed ? Icons.check : Icons.circle,
                 color: color,
                 size: completed ? 15 : 7,
               ),
@@ -1235,8 +1142,7 @@ class TimelineStep extends StatelessWidget {
                 width: 2,
                 height: 42,
                 color: completed
-                    ? const Color(0xFF16875B)
-                        .withOpacity(0.30)
+                    ? const Color(0xFF16875B).withOpacity(0.30)
                     : Colors.grey.shade300,
               ),
           ],
@@ -1255,9 +1161,7 @@ class TimelineStep extends StatelessWidget {
                   title,
 
                   style: TextStyle(
-                    color: completed
-                        ? const Color(0xFF143D2C)
-                        : Colors.grey,
+                    color: completed ? const Color(0xFF143D2C) : Colors.grey,
 
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
@@ -1339,11 +1243,7 @@ class StaticReportCard extends StatelessWidget {
                   shape: BoxShape.circle,
                 ),
 
-                child: Icon(
-                  icon,
-                  color: statusColor,
-                  size: 25,
-                ),
+                child: Icon(icon, color: statusColor, size: 25),
               ),
 
               const SizedBox(width: 12),
@@ -1364,30 +1264,21 @@ class StaticReportCard extends StatelessWidget {
 
                     Text(
                       wasteType,
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 10,
-                      ),
+                      style: const TextStyle(color: Colors.grey, fontSize: 10),
                     ),
 
                     const SizedBox(height: 2),
 
                     Text(
                       reportId,
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 9,
-                      ),
+                      style: const TextStyle(color: Colors.grey, fontSize: 9),
                     ),
                   ],
                 ),
               ),
 
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 9,
-                  vertical: 5,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
 
                 decoration: BoxDecoration(
                   color: statusColor.withOpacity(0.10),
@@ -1432,10 +1323,7 @@ class StaticReportCard extends StatelessWidget {
 
           Text(
             extraInfo,
-            style: const TextStyle(
-              color: Colors.grey,
-              fontSize: 10,
-            ),
+            style: const TextStyle(color: Colors.grey, fontSize: 10),
           ),
         ],
       ),

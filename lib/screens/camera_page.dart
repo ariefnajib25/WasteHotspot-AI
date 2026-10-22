@@ -983,105 +983,50 @@ class _CameraPageState extends State<CameraPage>
   // ==========================================================
 
   Widget buildPublicWastePhoto() {
-    return Container(
-      width: double.infinity,
-      height: 320,
-      decoration: BoxDecoration(
-        color: const Color(0xFFDDE4DD),
-        borderRadius:
-            BorderRadius.circular(22),
-      ),
-      child: Stack(
-        children: [
-          Container(
-            height: 115,
-            decoration:
-                const BoxDecoration(
-              color: Color(0xFFD6E8DF),
-              borderRadius:
-                  BorderRadius.vertical(
-                top: Radius.circular(22),
-              ),
-            ),
-          ),
-
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            height: 205,
-            child: Container(
-              decoration:
-                  const BoxDecoration(
-                color: Color(0xFFB5B9AD),
-                borderRadius:
-                    BorderRadius.vertical(
-                  bottom:
-                      Radius.circular(22),
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: SizedBox(
+        width: double.infinity,
+        height: 320,
+        child: Image.asset(
+          'assests/images/rubbish_public.jpg',
+          fit: BoxFit.cover,
+          errorBuilder: (
+            context,
+            error,
+            stackTrace,
+          ) {
+            return Container(
+              color: const Color(0xFFDDE4DD),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.image_outlined,
+                      size: 60,
+                      color: Color(0xFF16875B),
+                    ),
+                    SizedBox(height: 10),
+                    Text(
+                      'Rubbish image not found',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Color(0xFF16875B),
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-            ),
-          ),
-
-          const Positioned(
-            bottom: 100,
-            left: 25,
-            child: Icon(
-              Icons.grass,
-              size: 85,
-              color:
-                  Color(0xFF73966B),
-            ),
-          ),
-
-          const Positioned(
-            bottom: 100,
-            right: 25,
-            child: Icon(
-              Icons.grass,
-              size: 75,
-              color:
-                  Color(0xFF73966B),
-            ),
-          ),
-
-          const Positioned(
-            bottom: 50,
-            left: 70,
-            child: Icon(
-              Icons.local_drink,
-              size: 55,
-              color: Colors.blueGrey,
-            ),
-          ),
-
-          const Positioned(
-            bottom: 45,
-            right: 65,
-            child: Icon(
-              Icons.delete,
-              size: 70,
-              color:
-                  Color(0xFF4D4D4D),
-            ),
-          ),
-
-          Positioned(
-            bottom: 50,
-            left: 155,
-            child: Transform.rotate(
-              angle: 0.4,
-              child: const Icon(
-                Icons.fastfood,
-                size: 45,
-                color: Colors.orange,
-              ),
-            ),
-          ),
-        ],
+            );
+          },
+        ),
       ),
     );
   }
+
 
   // ==========================================================
   // PERSONAL PHOTO

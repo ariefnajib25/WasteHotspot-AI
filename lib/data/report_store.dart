@@ -19,6 +19,13 @@ class ReportStore {
 
   static final Map<String, int> _ecoPointsByUser = {};
   static final Map<String, int> _validReportsByUser = {};
+  static final Map<String, int> _completedReportsByUser = {};
+
+  static int get completedReports {
+    final String email = UserStore.currentUserEmail.trim().toLowerCase();
+
+    return _completedReportsByUser[email] ?? 0;
+  }
 
   static String get _currentUser {
     return UserStore.currentUserEmail.toLowerCase();
@@ -163,8 +170,20 @@ class ReportStore {
   }
 
   static void resolveZoneD() {
+    // Prevent resolving the same incident twice
+    if (zoneDResolved || zoneDReportCount == 0) {
+      return;
+    }
+
     zoneDResolved = true;
     zoneDResolvedAt = DateTime.now();
+
+    // Every resident who participated in this hotspot
+    // gets this report moved into Completed.
+    for (final String email in zoneDReporters) {
+      _completedReportsByUser[email] =
+          (_completedReportsByUser[email] ?? 0) + 1;
+    }
   }
 
   // ==========================================================
