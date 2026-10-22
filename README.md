@@ -107,3 +107,15 @@ Same hotspot
 → Duplicate detected
 → Merged into existing hotspot
 → +3 EcoPoints
+
+## Running the Project
+
+Make sure Flutter and Google Chrome are installed on your computer.
+
+Clone the repository:
+
+```bash
+git clone https://github.com/ariefnajib25/WasteHotspot-AI.git
+cd WasteHotspot-AI
+flutter pub get
+flutter run -d chrome
