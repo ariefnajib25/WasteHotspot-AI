@@ -1,5 +1,9 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../data/report_store.dart';
+import '../data/zone_d_cloud_service.dart';
 
 class CameraPage extends StatefulWidget {
   const CameraPage({super.key});
@@ -24,6 +28,24 @@ class _CameraPageState extends State<CameraPage>
   late Animation<double> scanAnimation;
 
   int scanSession = 0;
+  // Cloud Firestore synchronization for the Zone D demo.
+  StreamSubscription<ZoneDCloudReport>? zoneDSubscription;
+  bool firestoreLoaded = false;
+  bool submittingToFirestore = false;
+  String? firestoreError;
+  bool cloudReportResolved = false;
+  bool cloudDemoUnlocked = false;
+  bool cloudUserReported = false;
+  DateTime? cloudResolvedAt;
+  Timer? _twoHourTimer;
+
+  bool get canStartAnotherIncident =>
+      cloudReportResolved && (cloudDemoUnlocked ||
+          (cloudResolvedAt != null &&
+           !DateTime.now().isBefore(
+             cloudResolvedAt!.add(const Duration(hours: 2)),
+           )));
+
 
   // ==========================================================
   // INIT
@@ -47,10 +69,58 @@ class _CameraPageState extends State<CameraPage>
         curve: Curves.easeInOut,
       ),
     );
+
+    zoneDSubscription = ZoneDCloudService.watchZoneD().listen(
+      (report) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        ReportStore.applyCloudZoneD(
+          confirmations: report.confirmations,
+          unresolvedDays: report.unresolvedDays,
+          resolved: report.resolved,
+          resolvedAt: report.resolvedAt,
+          currentUserParticipated: report.reportedBy(uid),
+          currentUserPoints: report.pointsFor(uid),
+          incidentId: report.incidentId,
+          cloudTotalPoints: report.totalPointsFor(uid),
+          cloudValidReports: report.validReportsFor(uid),
+          cloudCompletedReports: report.completedReportsFor(uid),
+        );
+        if (!mounted) return;
+        _twoHourTimer?.cancel();
+        setState(() {
+          firestoreLoaded = true;
+          firestoreError = null;
+          cloudReportResolved = report.resolved;
+          cloudDemoUnlocked = report.demoUnlocked;
+          cloudResolvedAt = report.resolvedAt;
+          cloudUserReported = report.reportedBy(uid);
+        });
+        // Refresh the submit button exactly when the 2-hour wait expires,
+        // even if the user keeps this page open the whole time.
+        if (report.resolved && report.resolvedAt != null &&
+            !report.canStartNewIncident) {
+          final remaining = report.resolvedAt!
+              .add(const Duration(hours: 2))
+              .difference(DateTime.now());
+          _twoHourTimer = Timer(remaining + const Duration(seconds: 2), () {
+            if (mounted) setState(() {});
+          });
+        }
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          firestoreLoaded = false;
+          firestoreError = error.toString();
+        });
+      },
+    );
   }
 
   @override
   void dispose() {
+    zoneDSubscription?.cancel();
+    _twoHourTimer?.cancel();
     scanController.dispose();
     super.dispose();
   }
@@ -60,7 +130,7 @@ class _CameraPageState extends State<CameraPage>
   // ==========================================================
 
   int get existingReportCount {
-    return ReportStore.zoneDReportCount;
+    return canStartAnotherIncident ? 0 : ReportStore.zoneDReportCount;
   }
 
   bool get duplicateDetected {
@@ -68,7 +138,11 @@ class _CameraPageState extends State<CameraPage>
   }
 
   bool get currentUserAlreadyReported {
-    return ReportStore.currentUserAlreadyReportedZoneD;
+    // Only block repeat confirmations while the current case is ACTIVE.
+    // Once Admin resolves the case, show the two-hour waiting message
+    // instead of the misleading "Already Reported" warning.
+    // The Firestore transaction and security rules still enforce the wait.
+    return firestoreLoaded && cloudUserReported && !cloudReportResolved;
   }
 
   int get nextReportCount {
@@ -1665,12 +1739,31 @@ class _CameraPageState extends State<CameraPage>
         // SUBMIT BUTTON
         // ======================================================
 
+         if (!firestoreLoaded || firestoreError != null ||
+             (cloudReportResolved && !canStartAnotherIncident))
+           Padding(
+             padding: const EdgeInsets.only(bottom: 12),
+             child: Text(
+               firestoreError != null
+                   ? 'Firebase connection error. Check login and Firestore rules.'
+                   : cloudReportResolved
+                       ? 'Zone D is resolved. Open Progress and tap Simulate 2 Hours Later to enable a new report.'
+                       : 'Connecting to shared reports...',
+               textAlign: TextAlign.center,
+               style: const TextStyle(fontSize: 12, color: Colors.orange),
+             ),
+           ),
+
         if (!currentUserAlreadyReported)
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              onPressed:
-                  showSubmitConfirmation,
+              onPressed: firestoreLoaded &&
+                      firestoreError == null &&
+                      !submittingToFirestore &&
+                      (!cloudReportResolved || canStartAnotherIncident)
+                  ? showSubmitConfirmation
+                  : null,
               style:
                   ElevatedButton.styleFrom(
                 backgroundColor:
@@ -1968,83 +2061,82 @@ class _CameraPageState extends State<CameraPage>
   // SUBMIT REPORT
   // ==========================================================
 
-  void showSubmitConfirmation() {
-    if (currentUserAlreadyReported) {
+  Future<void> showSubmitConfirmation() async {
+    if (!isPublicDemo || !firestoreLoaded ||
+        submittingToFirestore || currentUserAlreadyReported ||
+        (cloudReportResolved && !canStartAnotherIncident)) {
       return;
     }
 
-    final bool wasDuplicate =
-        duplicateDetected;
+    setState(() => submittingToFirestore = true);
 
-    final int earnedPoints =
-        ReportStore.submitZoneDReport();
+    try {
+      // Firebase transaction is the source of truth for unique reporters.
+      final result = await ZoneDCloudService.submitZoneD();
+      if (!mounted) return;
 
-    final int finalConfirmationCount =
-        ReportStore.zoneDReportCount;
+      // A second click / browser window cannot get EcoPoints twice.
+      if (result.alreadyReported) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('You already confirmed Zone D.')),
+        );
+        return;
+      }
 
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return AlertDialog(
+      // EcoPoints and personal report counts are credited by the
+      // Firestore snapshot listener in ReportStore.applyCloudZoneD().
+      // Never call ReportStore.submitZoneDReport() again here.
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
           icon: Icon(
-            wasDuplicate
-                ? Icons.merge
-                : Icons.check_circle,
-            color:
-                const Color(0xFF16875B),
+            result.merged ? Icons.merge : Icons.check_circle,
+            color: const Color(0xFF16875B),
             size: 55,
           ),
-
           title: Text(
-            wasDuplicate
-                ? 'Report Merged'
-                : 'Report Submitted',
-            textAlign:
-                TextAlign.center,
+            result.merged ? 'Report Merged' : 'Report Submitted',
+            textAlign: TextAlign.center,
           ),
-
           content: Text(
-            wasDuplicate
-                ? 'Your confirmation has been merged into the existing hotspot.\n\nResident confirmations: $finalConfirmationCount\n\n🌱 You earned +$earnedPoints EcoPoints!'
-                : 'The public waste report has been added as a new township hotspot.\n\nResident confirmations: $finalConfirmationCount\n\n🌱 You earned +$earnedPoints EcoPoints!',
-            textAlign:
-                TextAlign.center,
+            result.merged
+                ? 'Your confirmation was merged into the same hotspot.\n\n'
+                    'Resident confirmations: ${result.confirmations}\n\n'
+                    '🌱 You earned +${result.earnedPoints} EcoPoints!'
+                : 'The public waste report was added as a new hotspot.\n\n'
+                    'Resident confirmations: ${result.confirmations}\n\n'
+                    '🌱 You earned +${result.earnedPoints} EcoPoints!',
+            textAlign: TextAlign.center,
           ),
-
-          actionsAlignment:
-              MainAxisAlignment.center,
-
+          actionsAlignment: MainAxisAlignment.center,
           actions: [
             ElevatedButton(
               onPressed: () {
-                Navigator.pop(
-                  dialogContext,
-                );
-
-                Navigator.pop(
-                  context,
-                  true,
-                );
+                Navigator.pop(dialogContext);
+                Navigator.pop(context, true);
               },
-              style:
-                  ElevatedButton.styleFrom(
-                backgroundColor:
-                    const Color(
-                  0xFF16875B,
-                ),
-                foregroundColor:
-                    Colors.white,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF16875B),
+                foregroundColor: Colors.white,
               ),
-              child: const Text(
-                'View on Map',
-              ),
+              child: const Text('View on Map'),
             ),
           ],
-        );
-      },
-    );
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not submit report: $error')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => submittingToFirestore = false);
+      }
+    }
   }
+
 }
 
 // ==========================================================

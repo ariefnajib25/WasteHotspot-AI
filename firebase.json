@@ -1,0 +1,36 @@
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "wastehotspot-ai",
+          "appId": "1:893798835043:android:6e1c88afafbaafe139e956",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "wastehotspot-ai",
+          "configurations": {
+            "android": "1:893798835043:android:6e1c88afafbaafe139e956",
+            "web": "1:893798835043:web:35ee86e906dc823f39e956"
+          }
+        }
+      }
+    }
+  },
+  "hosting": {
+    "public": "build/web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}

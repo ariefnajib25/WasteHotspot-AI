@@ -1,6 +1,12 @@
+import 'dart:async';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../data/report_store.dart';
+import '../data/zone_d_demo_preview.dart';
+import '../data/zone_d_cloud_service.dart';
 
 class ProgressPage extends StatefulWidget {
   final bool hasNewReport;
@@ -12,67 +18,102 @@ class ProgressPage extends StatefulWidget {
 }
 
 class _ProgressPageState extends State<ProgressPage> {
-  // ==========================================================
-  // ZONE D DATA
-  // ==========================================================
+  // Firestore is the source of truth for Zone D. Unlike local ReportStore
+  // variables, this works across separate resident and admin devices.
+  late final StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>
+      _zoneDSubscription;
 
-  bool get zoneDExists {
-    return ReportStore.zoneDVisibleToResidents &&
-        ReportStore.currentUserAlreadyReportedZoneD;
+  ZoneDCloudReport? _zoneD;
+  String _assignedTeam = 'Not assigned';
+  String _adminNote = '';
+  String? _firestoreError;
+  bool _loading = true;
+  bool _simulatingTwoHours = false;
+  bool _simulatingNextDay = false;
+  bool get _previewTwoHoursLater =>
+      (_zoneD?.demoUnlocked ?? false) || ZoneDDemoPreview.isMarkerHidden(_zoneD);
+
+  @override
+  void initState() {
+    super.initState();
+    _zoneDSubscription = FirebaseFirestore.instance
+        .collection('hotspots')
+        .doc('zone_d')
+        .snapshots()
+        .listen(
+      (snapshot) {
+        final report = ZoneDCloudReport.fromSnapshot(snapshot);
+        final data = snapshot.data();
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+
+        // Keep other existing resident pages' local state in sync during
+        // this session. This bridge is not the permanent cloud history store.
+        ReportStore.applyCloudZoneD(
+          confirmations: report.confirmations,
+          unresolvedDays: report.unresolvedDays,
+          resolved: report.resolved,
+          resolvedAt: report.resolvedAt,
+          currentUserParticipated: report.reportedBy(uid),
+          currentUserPoints: report.pointsFor(uid),
+          incidentId: report.incidentId,
+          cloudTotalPoints: report.totalPointsFor(uid),
+          cloudValidReports: report.validReportsFor(uid),
+          cloudCompletedReports: report.completedReportsFor(uid),
+        );
+
+        if (!mounted) return;
+        setState(() {
+          _zoneD = report;
+          _assignedTeam = data?['assignedTeam'] as String? ?? 'Not assigned';
+          _adminNote = data?['adminNote'] as String? ?? '';
+          _firestoreError = null;
+          _loading = false;
+        });
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          _loading = false;
+          _firestoreError = error.toString();
+        });
+      },
+    );
   }
 
-  bool get isResolved {
-    return ReportStore.zoneDResolved;
+  @override
+  void dispose() {
+    _zoneDSubscription.cancel();
+    super.dispose();
   }
 
-  bool get isUrgent {
-    return ReportStore.zoneDIsUrgent;
-  }
+  String? get _currentUid => FirebaseAuth.instance.currentUser?.uid;
 
-  int get unresolvedDays {
-    return ReportStore.zoneDUnresolvedDays;
-  }
+  // This resident only sees Zone D in their own report history if their
+  // Firebase UID is on the report's confirmation list.
+  bool get currentUserHasZoneDReport =>
+      _zoneD?.reportedBy(_currentUid) ?? false;
 
-  int get residentConfirmations {
-    return ReportStore.zoneDReportCount;
-  }
+  bool get zoneDExists =>
+      currentUserHasZoneDReport && (_zoneD?.confirmations ?? 0) > 0;
 
-  bool get managementAlertSent {
-    return ReportStore.zoneDManagementAlert;
-  }
+  bool get isResolved => _zoneD?.resolved ?? false;
 
-  // ==========================================================
-  // CURRENT USER
-  // ==========================================================
+  int get unresolvedDays => _zoneD?.unresolvedDays ?? 0;
 
-  bool get currentUserHasZoneDReport {
-    return ReportStore.currentUserAlreadyReportedZoneD;
-  }
+  int get residentConfirmations => _zoneD?.confirmations ?? 0;
 
-  // ==========================================================
-  // ACTIVE / COMPLETED REPORT COUNTS
-  // ==========================================================
+  bool get isUrgent =>
+      !isResolved && (residentConfirmations >= 3 || unresolvedDays >= 3);
 
-  int get myActiveReports {
-    const int existingActiveReports = 1;
+  bool get managementAlertSent =>
+      zoneDExists && !isResolved && unresolvedDays >= 2;
 
-    int active =
-        existingActiveReports +
-        ReportStore.validReports -
-        ReportStore.completedReports;
+  // Only count the signed-in resident's actual cloud participation.
+  // Zone A and Zone B are still static demo examples, not this user's cases.
+  int get myActiveReports => zoneDExists && !isResolved ? 1 : 0;
 
-    if (active < 0) {
-      return 0;
-    }
-
-    return active;
-  }
-
-  int get myCompletedReports {
-    const int existingCompletedReports = 1;
-
-    return existingCompletedReports + ReportStore.completedReports;
-  }
+  int get myCompletedReports =>
+      _zoneD?.completedReportsFor(_currentUid) ?? 0;
 
   // ==========================================================
   // PRIORITY
@@ -103,27 +144,31 @@ class _ProgressPageState extends State<ProgressPage> {
   }
 
   // ==========================================================
-  // ACTION STATUS
+  // LIVE ACTION STATUS
   // ==========================================================
 
   String get actionStatus {
-    if (isResolved) {
-      return 'Resolved';
-    }
+    if (isResolved) return 'Resolved';
 
-    if (unresolvedDays >= 3) {
-      return 'Overdue - Action Required';
+    final cloudStatus = _zoneD?.status ?? 'Pending Review';
+    if (cloudStatus == 'Under Review' ||
+        cloudStatus == 'In Progress' ||
+        cloudStatus == 'Pending Review') {
+      return cloudStatus;
     }
+    if (unresolvedDays >= 3) return 'Overdue - Action Required';
+    if (unresolvedDays >= 2) return 'Management Alert Sent';
+    if (unresolvedDays >= 1) return 'Pending Action';
+    return cloudStatus;
+  }
 
-    if (unresolvedDays >= 2) {
-      return 'Management Alert Sent';
-    }
-
-    if (unresolvedDays >= 1) {
-      return 'Pending Action';
-    }
-
-    return 'Searching for Action';
+  String get hotspotStatus {
+    if (isResolved) return 'Resolved';
+    if (unresolvedDays >= 3) return 'Overdue Hotspot';
+    if (residentConfirmations >= 3) return 'Repeated Hotspot';
+    if (residentConfirmations >= 2) return 'Existing Hotspot';
+    if (residentConfirmations == 1) return 'New Hotspot';
+    return 'No Hotspot';
   }
 
   // ==========================================================
@@ -132,130 +177,87 @@ class _ProgressPageState extends State<ProgressPage> {
 
   String get reportAge {
     if (unresolvedDays == 0) {
-      return 'Today • Day 0';
+      return 'Demo Day 0';
     }
 
     if (unresolvedDays == 1) {
-      return '1 Day';
+      return 'Demo Day 1';
     }
 
-    return '$unresolvedDays Days';
+    return 'Demo Day $unresolvedDays';
   }
 
   // ==========================================================
-  // SIMULATE NEXT DAY
+  // FIREBASE DEMO: RESIDENT ADVANCES SHARED UNRESOLVED DAY
   // ==========================================================
 
-  void simulateNextDay() {
-    if (!zoneDExists || isResolved) {
+  Future<void> simulateNextDay() async {
+    if (!zoneDExists || isResolved || _simulatingNextDay || unresolvedDays >= 7) {
       return;
     }
+    setState(() => _simulatingNextDay = true);
+    try {
+      final day = await ZoneDCloudService.simulateNextDay();
+      if (!mounted) return;
+      final message = day >= 3
+          ? 'Demo Day $day: URGENT! Admin has been alerted.'
+          : day >= 2
+              ? 'Demo Day 2: Management alert sent to Admin.'
+              : 'Demo Day 1: Admin received a new day update.';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: day >= 3
+              ? const Color(0xFF8B0000)
+              : const Color(0xFF16875B),
+          content: Text(message),
+        ),
+      );
+      // The Firestore .snapshots() listener updates the displayed day.
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to simulate next day: $error')),
+      );
+    } finally {
+      if (mounted) setState(() => _simulatingNextDay = false);
+    }
+  }
 
-    ReportStore.simulateNextDay();
+  // ==========================================================
+  // FIREBASE DEMO: FAST-FORWARD THE RESOLVED CASE
+  // ==========================================================
 
-    setState(() {});
+  Future<void> simulateTwoHoursLater() async {
+    if (!zoneDExists || !isResolved || _zoneD == null || _simulatingTwoHours) {
+      return;
+    }
+    if (_previewTwoHoursLater) return;
 
-    // ========================================================
-    // DAY 2
-    // ========================================================
-
-    if (ReportStore.zoneDUnresolvedDays == 2) {
+    setState(() => _simulatingTwoHours = true);
+    try {
+      // Cloud transaction updates the shared demoUnlocked flag.
+      // The real resolvedAt time and archived case are untouched.
+      await ZoneDCloudService.simulateTwoHoursLater();
+      if (!mounted) return;
+      ZoneDDemoPreview.simulateTwoHoursLater(_zoneD!);
+      setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          backgroundColor: Colors.orange,
-          content: Row(
-            children: [
-              Icon(Icons.notifications_active, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Day 2 reached. Township management has been automatically alerted.',
-                ),
-              ),
-            ],
+          backgroundColor: Color(0xFF16875B),
+          content: Text(
+            '2 hours simulated in Firebase! Zone D is hidden from maps. '
+            'You can now create a NEW report using Camera.',
           ),
         ),
       );
-    }
-    // ========================================================
-    // DAY 3+
-    // ========================================================
-    else if (ReportStore.zoneDUnresolvedDays >= 3) {
+    } catch (error) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          backgroundColor: Color(0xFF8B0000),
-          content: Row(
-            children: [
-              Icon(Icons.warning_amber, color: Colors.white),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Hotspot is overdue. Priority has been escalated to URGENT.',
-                ),
-              ),
-            ],
-          ),
-        ),
+        SnackBar(content: Text('Could not simulate 2 hours: $error')),
       );
+    } finally {
+      if (mounted) setState(() => _simulatingTwoHours = false);
     }
-  }
-
-  // ==========================================================
-  // RESOLVE HOTSPOT
-  // ==========================================================
-
-  void resolveHotspot() {
-    if (!zoneDExists || isResolved) {
-      return;
-    }
-
-    ReportStore.resolveZoneD();
-
-    setState(() {});
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        backgroundColor: Color(0xFF16875B),
-        content: Row(
-          children: [
-            Icon(Icons.check_circle, color: Colors.white),
-            SizedBox(width: 10),
-            Expanded(child: Text('Zone D hotspot has been resolved.')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==========================================================
-  // SIMULATE 2 HOURS LATER
-  // ==========================================================
-
-  void simulateTwoHoursLater() {
-    if (!ReportStore.zoneDResolved) {
-      return;
-    }
-
-    ReportStore.simulateTwoHoursLater();
-
-    setState(() {});
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        backgroundColor: Color(0xFF16875B),
-        content: Row(
-          children: [
-            Icon(Icons.schedule, color: Colors.white),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                '2 hours have passed. The resolved hotspot has been removed from the resident active view.',
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   // ==========================================================
@@ -296,6 +298,27 @@ class _ProgressPageState extends State<ProgressPage> {
 
               const SizedBox(height: 24),
 
+              if (_loading) ...[
+                const LinearProgressIndicator(color: Color(0xFF16875B)),
+                const SizedBox(height: 16),
+                const Text('Loading your live reports from Firebase...'),
+                const SizedBox(height: 18),
+              ],
+              if (_firestoreError != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFEBEE),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    'Unable to load your Zone D report: $_firestoreError',
+                    style: const TextStyle(color: Color(0xFF9F1D1D)),
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ],
+
               // ==================================================
               // SUMMARY
               // ==================================================
@@ -330,7 +353,9 @@ class _ProgressPageState extends State<ProgressPage> {
               // ==================================================
               if (zoneDExists) ...[
                 Text(
-                  isResolved ? 'Recently Resolved' : 'Active Report',
+                  isResolved
+                      ? (_previewTwoHoursLater ? 'Completed Report' : 'Recently Resolved')
+                      : 'Active Report',
                   style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
@@ -350,10 +375,53 @@ class _ProgressPageState extends State<ProgressPage> {
               ],
 
               // ==================================================
+              // COMPLETED ZONE D HISTORY SAVED IN FIRESTORE
+              // ==================================================
+              if (_zoneD != null &&
+                  _zoneD!.history.any((e) => e.reportedBy(_currentUid))) ...[
+                const Text('Completed Zone D History',
+                    style: TextStyle(fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF143D2C))),
+                const SizedBox(height: 13),
+                ..._zoneD!.history.where((e) => e.reportedBy(_currentUid))
+                    .map((oldCase) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Township Park, Zone D — Resolved',
+                                style: TextStyle(fontWeight: FontWeight.bold,
+                                    color: Color(0xFF16875B))),
+                            const SizedBox(height: 6),
+                            Text('Case: ${oldCase.incidentId}',
+                                style: const TextStyle(fontSize: 11,
+                                    color: Colors.grey)),
+                            const SizedBox(height: 5),
+                            Text('EcoPoints earned: +${oldCase.pointsFor(_currentUid)}',
+                                style: const TextStyle(fontSize: 12)),
+                            const SizedBox(height: 5),
+                            Text('Resolved: ${oldCase.resolvedAt?.toLocal().toString().substring(0, 16) ?? 'Unknown'}',
+                                style: const TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    )),
+                const SizedBox(height: 20),
+              ],
+
+              // ==================================================
               // OTHER REPORTS
               // ==================================================
               const Text(
-                'Other Reports',
+                'Other Reports (Demo)',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -603,7 +671,7 @@ class _ProgressPageState extends State<ProgressPage> {
           // ======================================================
           ProgressDetailRow(
             icon: Icons.schedule,
-            title: 'Report Age',
+            title: 'Report Age (Demo)',
             value: reportAge,
             valueColor: unresolvedDays >= 2 && !isResolved
                 ? Colors.orange
@@ -618,7 +686,7 @@ class _ProgressPageState extends State<ProgressPage> {
           ProgressDetailRow(
             icon: Icons.location_on_outlined,
             title: 'Hotspot Status',
-            value: ReportStore.zoneDStatus,
+            value: hotspotStatus,
             valueColor: priorityColor,
           ),
 
@@ -633,6 +701,24 @@ class _ProgressPageState extends State<ProgressPage> {
             value: actionStatus,
             valueColor: priorityColor,
           ),
+
+          if (_assignedTeam != 'Not assigned') ...[
+            const Divider(height: 25),
+            ProgressDetailRow(
+              icon: Icons.cleaning_services_outlined,
+              title: 'Assigned Team',
+              value: _assignedTeam,
+              valueColor: const Color(0xFF16875B),
+            ),
+          ],
+          if (_adminNote.isNotEmpty) ...[
+            const Divider(height: 25),
+            ProgressDetailRow(
+              icon: Icons.notes,
+              title: 'Management Note',
+              value: _adminNote,
+            ),
+          ],
 
           // ======================================================
           // MANAGEMENT ALERT
@@ -747,7 +833,7 @@ class _ProgressPageState extends State<ProgressPage> {
                         SizedBox(height: 4),
 
                         Text(
-                          'This waste issue has been resolved. The green marker will remain visible to residents for 2 hours before disappearing from the active map.',
+                          'This waste report is complete and remains in your history. Automatic 2-hour map removal is not yet linked to Firebase.',
                           style: TextStyle(
                             color: Colors.black54,
                             fontSize: 11,
@@ -789,6 +875,18 @@ class _ProgressPageState extends State<ProgressPage> {
           ),
 
           TimelineStep(
+            title: 'Management Review',
+            subtitle: actionStatus == 'In Progress'
+                ? 'A cleaning team is working on this report.'
+                : actionStatus == 'Under Review'
+                    ? 'Township management is reviewing this report.'
+                    : 'Waiting for management action.',
+            completed: isResolved ||
+                actionStatus == 'Under Review' ||
+                actionStatus == 'In Progress',
+          ),
+
+          TimelineStep(
             title: 'Resolved',
             subtitle: isResolved
                 ? 'Waste issue has been resolved.'
@@ -825,7 +923,7 @@ class _ProgressPageState extends State<ProgressPage> {
               SizedBox(width: 8),
 
               Text(
-                'Hackathon Demo Control',
+                'Hackathon Demo: Fast-Forward',
                 style: TextStyle(
                   color: Color(0xFF143D2C),
                   fontWeight: FontWeight.bold,
@@ -839,8 +937,8 @@ class _ProgressPageState extends State<ProgressPage> {
 
           Text(
             isResolved
-                ? 'The hotspot is resolved. Use the button below to simulate the 2-hour period before it disappears from the resident active view.'
-                : 'Use these controls to simulate time and resolution. In the real system, time would be calculated automatically.',
+                ? 'Tap below to simulate 2 hours in Firebase. The resolved marker disappears from both maps and the Camera allows a NEW Zone D report. Completed history stays saved. Only the first reporting Resident can run this demo.'
+                : 'Tap Simulate Next Day to advance the shared Firebase demo day. Admin will receive an in-app alert automatically. Day 2 triggers a MANAGEMENT ALERT and Day 3 becomes URGENT. Only Admin can resolve the report.',
             style: const TextStyle(
               color: Colors.black54,
               fontSize: 11,
@@ -858,7 +956,9 @@ class _ProgressPageState extends State<ProgressPage> {
               children: [
                 Expanded(
                   child: ElevatedButton.icon(
-                    onPressed: simulateNextDay,
+                    onPressed: (_simulatingNextDay || unresolvedDays >= 7)
+                        ? null
+                        : simulateNextDay,
 
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF16875B),
@@ -873,9 +973,13 @@ class _ProgressPageState extends State<ProgressPage> {
 
                     icon: const Icon(Icons.skip_next, size: 19),
 
-                    label: const Text(
-                      'Simulate Next Day',
-                      style: TextStyle(
+                    label: Text(
+                      _simulatingNextDay
+                          ? 'Updating Firebase...'
+                          : unresolvedDays >= 7
+                              ? 'Day 7 Maximum'
+                              : 'Simulate Next Day',
+                      style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
                       ),
@@ -887,7 +991,7 @@ class _ProgressPageState extends State<ProgressPage> {
 
                 Expanded(
                   child: OutlinedButton.icon(
-                    onPressed: resolveHotspot,
+                    onPressed: null,
 
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF16875B),
@@ -922,7 +1026,9 @@ class _ProgressPageState extends State<ProgressPage> {
               width: double.infinity,
 
               child: ElevatedButton.icon(
-                onPressed: simulateTwoHoursLater,
+                onPressed: (_previewTwoHoursLater || _simulatingTwoHours)
+                    ? null
+                    : simulateTwoHoursLater,
 
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF16875B),
@@ -937,9 +1043,13 @@ class _ProgressPageState extends State<ProgressPage> {
 
                 icon: const Icon(Icons.schedule),
 
-                label: const Text(
-                  'Simulate 2 Hours Later',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                label: Text(
+                  _previewTwoHoursLater
+                      ? 'New Report Unlocked'
+                      : _simulatingTwoHours
+                          ? 'Updating Firebase...'
+                          : 'Simulate 2 Hours Later',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),
             ),
@@ -949,8 +1059,8 @@ class _ProgressPageState extends State<ProgressPage> {
           Center(
             child: Text(
               isResolved
-                  ? 'Status: Resolved ✅'
-                  : 'Current simulation: Day $unresolvedDays',
+                  ? 'Status: Resolved (live Firebase)'
+                  : 'Firestore: $unresolvedDays unresolved day(s)',
               style: TextStyle(
                 color: isResolved
                     ? const Color(0xFF16875B)

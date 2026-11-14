@@ -1,122 +1,150 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
-import '../data/report_store.dart';
+import '../data/zone_d_cloud_service.dart';
+import '../data/zone_d_demo_preview.dart';
 
-class FullMapPage extends StatelessWidget {
+/// Expanded resident hotspot map.
+/// Zone D reads Firestore in real time; Zones A/B/C remain demonstration pins.
+class FullMapPage extends StatefulWidget {
   final bool hasNewReport;
 
   const FullMapPage({super.key, required this.hasNewReport});
 
-  // ==========================================================
-  // ZONE D DATA
-  // ==========================================================
+  @override
+  State<FullMapPage> createState() => _FullMapPageState();
+}
 
-  int get zoneDReportCount {
-    return ReportStore.zoneDReportCount;
-  }
-
-  bool get zoneDResolved {
-    return ReportStore.zoneDResolved;
-  }
-
-  bool get zoneDVisible {
-    return ReportStore.zoneDVisibleToResidents;
-  }
-
-  bool get zoneDIsUrgent {
-    return ReportStore.zoneDIsUrgent;
-  }
+class _FullMapPageState extends State<FullMapPage> with WidgetsBindingObserver {
+  StreamSubscription<ZoneDCloudReport>? _zoneDSubscription;
+  Timer? _resolvedMarkerExpiry;
+  ZoneDCloudReport? _zoneD;
+  bool _loadingZoneD = true;
+  String? _firestoreError;
 
   // ==========================================================
-  // ZONE D PRIORITY
+  // LIVE ZONE D DATA
   // ==========================================================
+
+  int get zoneDReportCount => _zoneD?.confirmations ?? 0;
+  bool get zoneDResolved => _zoneD?.resolved ?? false;
+  bool get zoneDVisible =>
+      (_zoneD?.visibleOnResidentMap ?? false) &&
+      !ZoneDDemoPreview.isMarkerHidden(_zoneD);
+  bool get zoneDIsUrgent => !zoneDResolved &&
+      (zoneDReportCount >= 3 || (_zoneD?.unresolvedDays ?? 0) >= 3);
 
   String get zoneDPriority {
-    if (zoneDResolved) {
-      return 'RESOLVED';
-    }
-
-    if (zoneDIsUrgent) {
-      return 'URGENT';
-    }
-
+    if (zoneDResolved) return 'RESOLVED';
+    if (zoneDIsUrgent) return 'URGENT';
     return 'HIGH';
   }
 
-  // ==========================================================
-  // ZONE D STATUS
-  // ==========================================================
-
   String get zoneDStatus {
-    if (zoneDResolved) {
-      return 'Resolved';
-    }
-
-    return ReportStore.zoneDStatus;
+    if (zoneDResolved) return 'Resolved';
+    final status = _zoneD?.status;
+    if (status == 'Under Review' || status == 'In Progress') return status!;
+    if ((_zoneD?.unresolvedDays ?? 0) >= 3) return 'Overdue Hotspot';
+    if (zoneDReportCount >= 3) return 'Repeated Hotspot';
+    if (zoneDReportCount >= 2) return 'Existing Hotspot';
+    return status ?? 'New Hotspot';
   }
 
-  // ==========================================================
-  // ZONE D MARKER LABEL
-  // ==========================================================
-
   String get zoneDMarkerLabel {
-    if (zoneDResolved) {
-      return 'RESOLVED';
-    }
-
-    if (zoneDReportCount <= 1) {
-      return 'NEW';
-    }
-
+    if (zoneDResolved) return 'RESOLVED';
+    if (zoneDReportCount <= 1) return 'NEW';
     return '$zoneDReportCount CONFIRMED';
   }
 
-  // ==========================================================
-  // ZONE D MARKER COLOR
-  // ==========================================================
-
-  Color get zoneDMarkerColor {
-    if (zoneDResolved) {
-      return const Color(0xFF16875B);
-    }
-
-    return Colors.red;
-  }
-
-  // ==========================================================
-  // ZONE D LABEL COLOR
-  // ==========================================================
+  Color get zoneDMarkerColor =>
+      zoneDResolved ? const Color(0xFF16875B) : Colors.red;
 
   Color get zoneDLabelColor {
-    if (zoneDResolved) {
+    if (zoneDResolved || zoneDReportCount <= 1) {
       return const Color(0xFF16875B);
     }
-
-    if (zoneDReportCount <= 1) {
-      return const Color(0xFF16875B);
-    }
-
-    if (zoneDIsUrgent) {
-      return const Color(0xFF8B0000);
-    }
-
+    if (zoneDIsUrgent) return const Color(0xFF8B0000);
     return Colors.red;
   }
 
-  // ==========================================================
-  // ZONE D PRIORITY COLOR
-  // ==========================================================
-
   Color get zoneDPriorityColor {
-    if (zoneDResolved) {
-      return const Color(0xFF16875B);
-    }
-
-    if (zoneDIsUrgent) {
-      return const Color(0xFF8B0000);
-    }
-
+    if (zoneDResolved) return const Color(0xFF16875B);
+    if (zoneDIsUrgent) return const Color(0xFF8B0000);
     return Colors.red;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ZoneDDemoPreview.hiddenResolvedIncidentId.addListener(_onDemoPreviewChanged);
+
+    if (FirebaseAuth.instance.currentUser == null) {
+      _loadingZoneD = false;
+      _firestoreError = 'Please sign in to see live Zone D reports.';
+      return;
+    }
+
+    _zoneDSubscription = ZoneDCloudService.watchZoneD().listen(
+      (report) {
+        if (!mounted) return;
+        setState(() {
+          _zoneD = report;
+          _loadingZoneD = false;
+          _firestoreError = null;
+        });
+        _scheduleMarkerExpiry(report);
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          _loadingZoneD = false;
+          _firestoreError = error.toString();
+        });
+      },
+    );
+  }
+
+  // Firestore won't send an event simply because two hours have elapsed.
+  // The local timer repaints this map at the display deadline.
+  void _scheduleMarkerExpiry(ZoneDCloudReport report) {
+    _resolvedMarkerExpiry?.cancel();
+    _resolvedMarkerExpiry = null;
+    if (!report.resolved || report.resolvedAt == null) return;
+
+    final deadline = report.resolvedAt!.add(const Duration(hours: 2));
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining <= Duration.zero) return;
+
+    _resolvedMarkerExpiry = Timer(
+      remaining + const Duration(milliseconds: 50),
+      () {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  // Recheck the expiry time when the browser/app returns from background.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      setState(() {});
+    }
+  }
+
+  void _onDemoPreviewChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    ZoneDDemoPreview.hiddenResolvedIncidentId.removeListener(_onDemoPreviewChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _resolvedMarkerExpiry?.cancel();
+    _zoneDSubscription?.cancel();
+    super.dispose();
   }
 
   // ==========================================================
@@ -399,6 +427,7 @@ class FullMapPage extends StatelessWidget {
                       bottom: mapHeight * 0.15,
                       right: mapWidth * 0.16,
                       child: PulseMapMarker(
+                        key: ValueKey('zone_d_${_zoneD?.incidentId}_${zoneDResolved ? 'resolved' : 'active'}'),
                         color: zoneDMarkerColor,
                         label: zoneDMarkerLabel,
                         labelColor: zoneDLabelColor,
@@ -409,6 +438,64 @@ class FullMapPage extends StatelessWidget {
                         onTap: () {
                           showZoneDDetails(context);
                         },
+                      ),
+                    ),
+
+                  // ==================================================
+                  // FIRESTORE CONNECTION STATUS
+                  // ==================================================
+                  if (_loadingZoneD)
+                    Positioned(
+                      top: 18,
+                      left: 14,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.95),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF16875B),
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Text('Loading Zone D...',
+                                style: TextStyle(fontSize: 11)),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  if (_firestoreError != null)
+                    Positioned(
+                      left: 14,
+                      right: 14,
+                      bottom: 16,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF3E0),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded,
+                                color: Colors.deepOrange, size: 19),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text('Firebase: $_firestoreError',
+                                  style: const TextStyle(fontSize: 11)),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
 

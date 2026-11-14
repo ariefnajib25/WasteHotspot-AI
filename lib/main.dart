@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'firebase_options.dart';
 
 import 'screens/home_page.dart';
 import 'screens/camera_page.dart';
@@ -9,7 +12,13 @@ import 'screens/splash_screen.dart';
 import 'screens/login_page.dart';
 import 'data/user_store.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   runApp(const WasteHotspotApp());
 }
 
@@ -52,8 +61,10 @@ class _MainScreenState extends State<MainScreen> {
   // Did the user submit our dummy report?
   bool newReportSubmitted = false;
 
-  void logout() {
+  Future<void> logout() async {
+    await FirebaseAuth.instance.signOut();
     UserStore.logout();
+    if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,

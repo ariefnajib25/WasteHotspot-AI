@@ -1,35 +1,158 @@
+import 'dart:async';
+
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../data/report_store.dart';
+import '../data/zone_d_demo_preview.dart';
+import '../data/zone_d_cloud_service.dart';
 import 'full_map_page.dart';
 
-class HomePage extends StatelessWidget {
+/// Resident Home shows live Zone D data from Firebase.
+/// Other township pins and overview figures remain demo examples.
+class HomePage extends StatefulWidget {
   final bool hasNewReport;
 
   const HomePage({super.key, required this.hasNewReport});
 
-  // ==========================================================
-  // SHARED TOWNSHIP DATA
-  // ==========================================================
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
 
-  bool get zoneDExists {
-    return ReportStore.zoneDVisibleToResidents;
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
+  StreamSubscription<ZoneDCloudReport>? _zoneDSubscription;
+  Timer? _resolvedMarkerExpiry;
+  ZoneDCloudReport? _zoneD;
+  bool _loadingZoneD = true;
+  String? _firestoreError;
+
+  String? get _currentUid => FirebaseAuth.instance.currentUser?.uid;
+
+  // The service reads the current Zone D incident and its archived history.
+  // A resident does not need to have reported it to see a public hotspot.
+  bool get zoneDExists =>
+      (_zoneD?.visibleOnResidentMap ?? false) &&
+      !ZoneDDemoPreview.isMarkerHidden(_zoneD);
+  int get zoneDReportCount => _zoneD?.confirmations ?? 0;
+  bool get zoneDResolved => _zoneD?.resolved ?? false;
+  bool get zoneDIsUrgent => !zoneDResolved &&
+      (zoneDReportCount >= 3 || (_zoneD?.unresolvedDays ?? 0) >= 3);
+
+  String get zoneDMarkerLabel => zoneDReportCount <= 1
+      ? 'NEW'
+      : '$zoneDReportCount REPORTS';
+
+  // Calculate the current user's points directly from Firebase data.
+  // This preserves points from older incidents after a new cycle begins.
+  int get ecoPoints => _zoneD?.totalPointsFor(_currentUid) ?? 0;
+
+  String get userLevel {
+    if (ecoPoints >= 300) return 'Township Hero';
+    if (ecoPoints >= 150) return 'Eco Champion';
+    if (ecoPoints >= 50) return 'Green Helper';
+    return 'Green Starter';
   }
 
-  int get zoneDReportCount {
-    return ReportStore.zoneDReportCount;
+  int get nextLevelTarget {
+    if (ecoPoints < 50) return 50;
+    if (ecoPoints < 150) return 150;
+    return 300;
   }
 
-  String get zoneDMarkerLabel {
-    if (zoneDReportCount <= 1) {
-      return 'NEW';
+  double get levelProgress {
+    if (ecoPoints >= 300) return 1.0;
+    if (ecoPoints < 50) return ecoPoints / 50;
+    if (ecoPoints < 150) return (ecoPoints - 50) / 100;
+    return (ecoPoints - 150) / 150;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    ZoneDDemoPreview.hiddenResolvedIncidentId.addListener(_onDemoPreviewChanged);
+
+    if (_currentUid == null) {
+      _loadingZoneD = false;
+      _firestoreError = 'Sign in to view live Zone D reports.';
+      return;
     }
 
-    return '$zoneDReportCount REPORTS';
+    _zoneDSubscription = ZoneDCloudService.watchZoneD().listen(
+      (report) {
+        if (!mounted) return;
+
+        // A compatibility bridge for existing Full Map/Profile widgets
+        // that still access ReportStore's local getters.
+        final uid = _currentUid;
+        ReportStore.applyCloudZoneD(
+          confirmations: report.confirmations,
+          unresolvedDays: report.unresolvedDays,
+          resolved: report.resolved,
+          resolvedAt: report.resolvedAt,
+          currentUserParticipated: report.reportedBy(uid),
+          currentUserPoints: report.pointsFor(uid),
+          incidentId: report.incidentId,
+          cloudTotalPoints: report.totalPointsFor(uid),
+          cloudValidReports: report.validReportsFor(uid),
+          cloudCompletedReports: report.completedReportsFor(uid),
+        );
+
+        setState(() {
+          _zoneD = report;
+          _loadingZoneD = false;
+          _firestoreError = null;
+        });
+        _scheduleMarkerExpiry(report);
+      },
+      onError: (Object error) {
+        if (!mounted) return;
+        setState(() {
+          _loadingZoneD = false;
+          _firestoreError = error.toString();
+        });
+      },
+    );
   }
 
-  bool get zoneDIsUrgent {
-    return zoneDReportCount >= 3;
+  // Firestore does not emit a change merely because 2 hours elapsed.
+  // Schedule a local repaint when a resolved marker should disappear.
+  void _scheduleMarkerExpiry(ZoneDCloudReport report) {
+    _resolvedMarkerExpiry?.cancel();
+    _resolvedMarkerExpiry = null;
+    if (!report.resolved || report.resolvedAt == null) return;
+
+    final expiresAt = report.resolvedAt!.add(const Duration(hours: 2));
+    final remaining = expiresAt.difference(DateTime.now());
+    if (remaining <= Duration.zero) return;
+
+    _resolvedMarkerExpiry = Timer(
+      remaining + const Duration(milliseconds: 50),
+      () {
+        if (mounted) setState(() {});
+      },
+    );
+  }
+
+  // Re-evaluate the deadline if the app was suspended in the background.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted && _zoneD != null) {
+      setState(() {});
+    }
+  }
+
+  void _onDemoPreviewChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    ZoneDDemoPreview.hiddenResolvedIncidentId.removeListener(_onDemoPreviewChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    _resolvedMarkerExpiry?.cancel();
+    _zoneDSubscription?.cancel();
+    super.dispose();
   }
 
   // ==========================================================
@@ -204,7 +327,7 @@ class HomePage extends StatelessWidget {
                               const SizedBox(height: 2),
 
                               Text(
-                                '${ReportStore.ecoPoints} pts',
+                                '$ecoPoints pts',
                                 style: const TextStyle(
                                   fontSize: 23,
                                   fontWeight: FontWeight.bold,
@@ -225,7 +348,7 @@ class HomePage extends StatelessWidget {
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            ReportStore.userLevel,
+                            userLevel,
                             style: const TextStyle(
                               color: Color(0xFF16875B),
                               fontSize: 10,
@@ -241,7 +364,7 @@ class HomePage extends StatelessWidget {
                     ClipRRect(
                       borderRadius: BorderRadius.circular(20),
                       child: LinearProgressIndicator(
-                        value: ReportStore.levelProgress,
+                        value: levelProgress,
                         minHeight: 8,
                         backgroundColor: const Color(0xFFE9EEEB),
                         valueColor: const AlwaysStoppedAnimation<Color>(
@@ -256,7 +379,7 @@ class HomePage extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          'Level: ${ReportStore.userLevel}',
+                          'Level: ${userLevel}',
                           style: const TextStyle(
                             fontSize: 11,
                             color: Colors.grey,
@@ -264,9 +387,9 @@ class HomePage extends StatelessWidget {
                         ),
 
                         Text(
-                          ReportStore.ecoPoints >= 300
+                          ecoPoints >= 300
                               ? 'Maximum level reached'
-                              : '${ReportStore.ecoPoints} / ${ReportStore.nextLevelTarget} pts',
+                              : '$ecoPoints / $nextLevelTarget pts',
                           style: const TextStyle(
                             fontSize: 11,
                             color: Colors.grey,
@@ -313,6 +436,47 @@ class HomePage extends StatelessWidget {
 
               const SizedBox(height: 12),
 
+              if (_loadingZoneD)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 15,
+                        height: 15,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      SizedBox(width: 10),
+                      Text('Loading live Zone D status...',
+                          style: TextStyle(fontSize: 11, color: Colors.grey)),
+                    ],
+                  ),
+                ),
+
+              if (_firestoreError != null)
+                Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF3E0),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.warning_amber_rounded,
+                          color: Colors.deepOrange, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Live Zone D unavailable: $_firestoreError',
+                          style: const TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
               // ==================================================
               // MAP
               // ==================================================
@@ -322,7 +486,7 @@ class HomePage extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (context) =>
-                          FullMapPage(hasNewReport: hasNewReport),
+                          FullMapPage(hasNewReport: widget.hasNewReport),
                     ),
                   );
                 },
@@ -474,37 +638,36 @@ class HomePage extends StatelessWidget {
                         // ==========================================
                         // ZONE D
                         //
-                        // IMPORTANT:
-                        // This uses ReportStore, NOT hasNewReport.
-                        // Therefore User B can still see User A's
-                        // hotspot.
+                        // Firestore listener drives the marker for all
+                        // signed-in residents, not the local report flag.
                         // ==========================================
                         if (zoneDExists)
                           Positioned(
                             bottom: 78,
                             right: 78,
                             child: HotspotMarker(
-                              color: ReportStore.zoneDResolved
+                              key: ValueKey('zone_d_${_zoneD?.incidentId}_${zoneDResolved ? 'resolved' : 'active'}'),
+                              color: zoneDResolved
                                   ? const Color(0xFF16875B)
                                   : Colors.red,
 
-                              size: ReportStore.zoneDResolved
+                              size: zoneDResolved
                                   ? 35
                                   : zoneDIsUrgent
                                   ? 39
                                   : 35,
 
-                              label: ReportStore.zoneDResolved
+                              label: zoneDResolved
                                   ? 'RESOLVED'
                                   : zoneDMarkerLabel,
 
-                              labelColor: ReportStore.zoneDResolved
+                              labelColor: zoneDResolved
                                   ? const Color(0xFF16875B)
                                   : zoneDReportCount == 1
                                   ? const Color(0xFF16875B)
                                   : Colors.red,
 
-                              strongPulse: !ReportStore.zoneDResolved,
+                              strongPulse: !zoneDResolved,
                             ),
                           ),
                         // ==========================================
@@ -551,11 +714,13 @@ class HomePage extends StatelessWidget {
               // ==================================================
               // NEW REPORT MESSAGE
               //
-              // This remains session-based.
-              // User B will not see "New report added" just because
-              // User A submitted it.
+              // Personal success banner is session-based.
+              // Live Zone D map data comes from Firestore.
               // ==================================================
-              if (hasNewReport) ...[
+              if (widget.hasNewReport &&
+                  zoneDExists &&
+                  !zoneDResolved &&
+                  (_zoneD?.reportedBy(_currentUid) ?? false)) ...[
                 const SizedBox(height: 14),
 
                 Container(
@@ -639,7 +804,7 @@ class HomePage extends StatelessWidget {
                     child: OverviewCard(
                       icon: Icons.warning_amber,
                       title: 'High Severity',
-                      value: zoneDExists ? '4' : '3',
+                      value: zoneDExists && !zoneDResolved ? '4' : '3',
                       subtitle: 'Need attention',
                       iconColor: Colors.orange,
                     ),
@@ -789,7 +954,9 @@ class HomePage extends StatelessWidget {
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
-                          Icons.delete_outline,
+                          zoneDResolved
+                              ? Icons.check_circle_outline
+                              : Icons.delete_outline,
                           color: zoneDIsUrgent
                               ? Colors.red
                               : const Color(0xFF16875B),
@@ -814,13 +981,17 @@ class HomePage extends StatelessWidget {
                             const SizedBox(height: 5),
 
                             Text(
-                              zoneDIsUrgent
+                              zoneDResolved
+                                  ? 'RESOLVED • Cleanup completed'
+                                  : zoneDIsUrgent
                                   ? 'URGENT • Repeated Hotspot'
                                   : zoneDReportCount >= 2
                                   ? 'HIGH • Existing Hotspot'
                                   : 'HIGH • New Hotspot',
                               style: TextStyle(
-                                color: zoneDIsUrgent
+                                color: zoneDResolved
+                                    ? const Color(0xFF16875B)
+                                    : zoneDIsUrgent
                                     ? Colors.red
                                     : Colors.orange,
                                 fontSize: 11,
