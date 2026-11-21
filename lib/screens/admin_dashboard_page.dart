@@ -917,17 +917,17 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       Positioned(left: w * .105, top: h * .22,
         child: _AdminPulseMapMarker(
           color: const Color(0xFFE1A72E), label: '2 DEMO',
-          onTap: onZoneTap == null ? null : () => onZoneTap?.call('A'),
+          onTap: onZoneTap == null ? null : () => onZoneTap.call('A'),
         )),
       Positioned(right: w * .06, top: h * .39,
         child: _AdminPulseMapMarker(
           color: Colors.orange, label: '4 DEMO',
-          onTap: onZoneTap == null ? null : () => onZoneTap?.call('B'),
+          onTap: onZoneTap == null ? null : () => onZoneTap.call('B'),
         )),
       Positioned(left: w * .13, top: h * .63,
         child: _AdminPulseMapMarker(
           color: Colors.red, label: '17 DEMO', strongPulse: true,
-          onTap: onZoneTap == null ? null : () => onZoneTap?.call('C'),
+          onTap: onZoneTap == null ? null : () => onZoneTap.call('C'),
         )),
       if (_showZoneDMapMarker)
         Positioned(right: w * .09, top: h * .60,
@@ -936,7 +936,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
             color: liveColor, label: liveLabel,
             labelColor: _urgent ? const Color(0xFF8B0000) : liveColor,
             strongPulse: !_resolved,
-            onTap: onZoneTap == null ? null : () => onZoneTap?.call('D'),
+            onTap: onZoneTap == null ? null : () => onZoneTap.call('D'),
           )),
       // Show the legend only in the expanded map, not on the Admin Home map.
       if (showLegend)
@@ -1933,23 +1933,6 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       ]),
     );
   }
-
-  Widget _emptyState() => Container(
-    padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 22),
-    decoration: BoxDecoration(color: Colors.white,
-        borderRadius: BorderRadius.circular(20)),
-    child: Column(children: [
-      const Icon(Icons.inbox_outlined, size: 55, color: Color(0xFF94AEA0)),
-      const SizedBox(height: 9),
-      const Text('No reports in this view',
-          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-      const SizedBox(height: 6),
-      Text(_exists ? 'Try another filter.' :
-            'Submit a waste report from the resident app first.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Color(0xFF69786E), fontSize: 13)),
-    ]),
-  );
 
   Widget _demoInfo() => Container(
     padding: const EdgeInsets.all(14),
