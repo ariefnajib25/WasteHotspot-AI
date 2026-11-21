@@ -1998,6 +1998,9 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
       _reportSubscription;
   bool _loading = true;
   bool _busy = false;
+  // Local-only demonstration: NOT a real photo or verified evidence.
+  bool _demoCaptureComplete = false;
+  String? _demoCaptureIncidentId;
   bool _draftDirty = false;
   String? _loadError;
 
@@ -2014,6 +2017,11 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
         if (!mounted) return;
         final latest = _AdminZoneD.fromSnapshot(snapshot);
         setState(() {
+          // A demo confirmation must never carry over to a new incident.
+          if (_demoCaptureIncidentId != latest.incidentId || latest.resolved) {
+            _demoCaptureComplete = false;
+            _demoCaptureIncidentId = null;
+          }
           _report = latest;
           _loading = false;
           _loadError = null;
@@ -2119,15 +2127,86 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
     }
   }
 
+  // Prototype only: simulates capturing cleaning evidence without using
+  // the camera, gallery, Firebase Storage, or any image upload.
+  Future<void> _simulateCleaningCapture() async {
+    if (!_report.exists || _report.resolved || _busy) return;
+    final currentIncidentId = _report.incidentId;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(children: [
+          Icon(Icons.camera_alt_outlined, color: green),
+          SizedBox(width: 9),
+          Expanded(child: Text('Cleaning Camera — Demo')),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: double.infinity,
+            height: 170,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE9F5ED),
+              border: Border.all(color: const Color(0xFFB7D7C3)),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              Icon(Icons.camera_alt_rounded, color: green, size: 45),
+              SizedBox(height: 8),
+              Text('SIMULATED CAMERA VIEW',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold,
+                      color: green)),
+              SizedBox(height: 4),
+              Text('No actual photo will be taken',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+            ]),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Prototype demonstration only. In the proposed full system, '
+            'Admin would take a fresh cleaning photo before resolving the report.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
+          ),
+        ]),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.camera),
+            label: const Text('Simulate Capture'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true) return;
+    if (_report.incidentId != currentIncidentId || _report.resolved) {
+      _showMessage('The incident changed. Try the demo capture again.');
+      return;
+    }
+    setState(() {
+      _demoCaptureComplete = true;
+      _demoCaptureIncidentId = currentIncidentId;
+    });
+    _showMessage('Demo capture completed. You can now resolve this case.');
+  }
+
   Future<void> _resolve() async {
     if (!_report.exists || _report.resolved || _busy) return;
+    if (!_demoCaptureComplete || _demoCaptureIncidentId != _report.incidentId) {
+      _showMessage('Complete the simulated cleaning capture before resolving.');
+      return;
+    }
+    final expectedIncidentId = _report.incidentId;
     final sure = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Mark Zone D as resolved?'),
         content: const Text(
-          'This will mark the shared Firebase report as resolved. '
-          'Resident pages that listen to Firestore will receive the update.',
+          'A SIMULATED cleaning capture has been completed for this demo. '
+          'No actual evidence photo has been taken or stored. '
+          'The report status will update in Firebase for Residents.',
         ),
         actions: [
           TextButton(
@@ -2154,6 +2233,9 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
         if (latest.data()?['resolved'] == true) {
           throw StateError('Zone D is already resolved.');
         }
+        if (latest.data()?['incidentId'] != expectedIncidentId) {
+          throw StateError('The active incident changed. Please repeat the demo capture.');
+        }
         transaction.update(_zoneDRef, {
           'status': 'Resolved',
           'resolved': true,
@@ -2167,6 +2249,8 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
       setState(() {
         _status = 'Resolved';
         _busy = false;
+        _demoCaptureComplete = false;
+        _demoCaptureIncidentId = null;
         _draftDirty = false;
       });
       _showMessage('Zone D marked as resolved in Firebase.');
@@ -2275,10 +2359,59 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
               label: Text(_busy ? 'Saving...' : 'Save Management Update'),
             ),
           ),
+          const SizedBox(height: 18),
+          const Text('Proof of Cleaning (Prototype)',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const SizedBox(height: 6),
+          const Text('Camera capture is simulated for demonstration. '
+              'No actual image is captured, uploaded or verified.',
+              style: TextStyle(color: Colors.black54, fontSize: 12)),
+          if (!resolved) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: green,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: Colors.grey.shade300,
+                  disabledForegroundColor: Colors.grey.shade600,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  elevation: 2,
+                  textStyle: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                onPressed: !exists || _busy ? null : _simulateCleaningCapture,
+                icon: const Icon(Icons.camera_alt_rounded, size: 23),
+                label: Text(_demoCaptureComplete &&
+                        _demoCaptureIncidentId == _report.incidentId
+                    ? 'Repeat Simulated Capture' : 'Simulate Camera Capture'),
+              ),
+            ),
+            if (_demoCaptureComplete &&
+                _demoCaptureIncidentId == _report.incidentId)
+              const Padding(
+                padding: EdgeInsets.only(top: 8),
+                child: Row(children: [
+                  Icon(Icons.check_circle, size: 18, color: green),
+                  SizedBox(width: 7),
+                  Expanded(child: Text('Demo capture completed — not real proof.',
+                      style: TextStyle(fontSize: 12, color: green))),
+                ]),
+              ),
+          ],
           const SizedBox(height: 8),
           SizedBox(width: double.infinity,
             child: OutlinedButton.icon(
-              onPressed: resolved || !exists || _busy ? null : _resolve,
+              onPressed: resolved || !exists || _busy ||
+                  !_demoCaptureComplete ||
+                  _demoCaptureIncidentId != _report.incidentId
+                  ? null : _resolve,
               icon: const Icon(Icons.verified_outlined),
               label: const Text('Mark Case as Resolved'),
               style: OutlinedButton.styleFrom(
@@ -2289,7 +2422,7 @@ class _AdminReportDetailPageState extends State<AdminReportDetailPage> {
             const Padding(
               padding: EdgeInsets.only(top: 10),
               child: Text('This incident is resolved in Firebase. '
-                  'Resident history syncing will be connected next.',
+                  'This prototype used simulated capture, not actual cleaning-photo evidence.',
                   style: TextStyle(color: green)),
             ),
         ]),

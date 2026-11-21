@@ -14,10 +14,10 @@ import threading
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-HOST = "127.0.0.1"          # only this computer
+HOST = "0.0.0.0"          # only this computer
 PORT = 5000
 DB_PATH = Path(__file__).resolve().parent / "wastehotspot_demo.sqlite3"
-ALLOWED_ORIGINS = {"http://localhost:51515", "http://127.0.0.1:51515"}
+ALLOWED_ORIGINS = {"http://localhost:51515", "http://127.0.0.1:51515","http://192.168.68.102:51515"}
 LOCK = threading.RLock()
 
 

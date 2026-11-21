@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 /// Independent experiment: test two browser windows connected to the SAME
 /// local Python + SQLite server without changing the main WasteHotspot app.
 /// Run: flutter run -d chrome --web-port 51515 -t lib/connected_demo_main.dart
-const apiBase = 'http://127.0.0.1:5000';
+const apiBase = 'http://192.168.68.102:5000';
 const green = Color(0xFF16875B);
 const darkGreen = Color(0xFF153B2A);
 
