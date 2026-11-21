@@ -37,13 +37,13 @@ class _CameraPageState extends State<CameraPage>
   bool cloudDemoUnlocked = false;
   bool cloudUserReported = false;
   DateTime? cloudResolvedAt;
-  Timer? _twoHourTimer;
+  Timer? _resolvedCooldownTimer;
 
   bool get canStartAnotherIncident =>
       cloudReportResolved && (cloudDemoUnlocked ||
           (cloudResolvedAt != null &&
            !DateTime.now().isBefore(
-             cloudResolvedAt!.add(const Duration(hours: 2)),
+             cloudResolvedAt!.add(const Duration(seconds: 30)),
            )));
 
 
@@ -86,7 +86,7 @@ class _CameraPageState extends State<CameraPage>
           cloudCompletedReports: report.completedReportsFor(uid),
         );
         if (!mounted) return;
-        _twoHourTimer?.cancel();
+        _resolvedCooldownTimer?.cancel();
         setState(() {
           firestoreLoaded = true;
           firestoreError = null;
@@ -95,14 +95,14 @@ class _CameraPageState extends State<CameraPage>
           cloudResolvedAt = report.resolvedAt;
           cloudUserReported = report.reportedBy(uid);
         });
-        // Refresh the submit button exactly when the 2-hour wait expires,
+        // Refresh the submit button exactly when the 30-second wait expires,
         // even if the user keeps this page open the whole time.
         if (report.resolved && report.resolvedAt != null &&
             !report.canStartNewIncident) {
           final remaining = report.resolvedAt!
-              .add(const Duration(hours: 2))
+              .add(const Duration(seconds: 30))
               .difference(DateTime.now());
-          _twoHourTimer = Timer(remaining + const Duration(seconds: 2), () {
+          _resolvedCooldownTimer = Timer(remaining + const Duration(milliseconds: 120), () {
             if (mounted) setState(() {});
           });
         }
@@ -120,7 +120,7 @@ class _CameraPageState extends State<CameraPage>
   @override
   void dispose() {
     zoneDSubscription?.cancel();
-    _twoHourTimer?.cancel();
+    _resolvedCooldownTimer?.cancel();
     scanController.dispose();
     super.dispose();
   }
@@ -139,7 +139,7 @@ class _CameraPageState extends State<CameraPage>
 
   bool get currentUserAlreadyReported {
     // Only block repeat confirmations while the current case is ACTIVE.
-    // Once Admin resolves the case, show the two-hour waiting message
+    // Once Admin resolves the case, show the 30-second waiting message
     // instead of the misleading "Already Reported" warning.
     // The Firestore transaction and security rules still enforce the wait.
     return firestoreLoaded && cloudUserReported && !cloudReportResolved;
@@ -1747,7 +1747,7 @@ class _CameraPageState extends State<CameraPage>
                firestoreError != null
                    ? 'Firebase connection error. Check login and Firestore rules.'
                    : cloudReportResolved
-                       ? 'Zone D is resolved. Open Progress and tap Simulate 2 Hours Later to enable a new report.'
+                       ? 'Zone D is resolved. Wait 30 seconds, or open Progress and tap Simulate 30 Seconds Later to submit a new report.'
                        : 'Connecting to shared reports...',
                textAlign: TextAlign.center,
                style: const TextStyle(fontSize: 12, color: Colors.orange),

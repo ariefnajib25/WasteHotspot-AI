@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:async';
+
+import 'data/resident_notification_center.dart';
 import 'firebase_options.dart';
 
 import 'screens/home_page.dart';
@@ -57,6 +60,97 @@ class MainScreen extends StatefulWidget {
 
 class _MainScreenState extends State<MainScreen> {
   int currentIndex = 0;
+
+  // One listener for ALL Resident tabs: Home, Community and Progress.
+  late final ResidentNotificationCenter _residentNotifications;
+  OverlayEntry? _activeResidentBanner;
+  Timer? _residentBannerTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _residentNotifications = ResidentNotificationCenter()
+      ..onBanner = _showResidentTopBanner
+      ..start();
+  }
+
+  void _dismissResidentBanner() {
+    _residentBannerTimer?.cancel();
+    _residentBannerTimer = null;
+    final banner = _activeResidentBanner;
+    _activeResidentBanner = null;
+    if (banner != null) {
+      banner.remove();
+      banner.dispose();
+    }
+  }
+
+  void _showResidentTopBanner(ResidentNotice notice) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _dismissResidentBanner();
+      final top = MediaQuery.of(context).padding.top;
+      final overlay = Overlay.of(context, rootOverlay: true);
+      final entry = OverlayEntry(
+        builder: (bannerContext) => Positioned(
+          top: top + 12,
+          left: 16,
+          right: 16,
+          child: Center(child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 540),
+            child: TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: -1.0, end: 0.0),
+              duration: const Duration(milliseconds: 330),
+              curve: Curves.easeOutCubic,
+              builder: (context, offset, child) => Transform.translate(
+                offset: Offset(0, offset * 120), child: child),
+              child: Material(
+                color: ResidentNotificationCenter.colorFor(notice.type),
+                elevation: 12,
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                  child: Row(children: [
+                    Icon(ResidentNotificationCenter.iconFor(notice.type),
+                        color: Colors.white, size: 25),
+                    const SizedBox(width: 10),
+                    Expanded(child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(notice.title, style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 13,
+                            color: Colors.white)),
+                        const SizedBox(height: 3),
+                        Text(notice.message, style: const TextStyle(
+                            fontSize: 12, height: 1.35, color: Colors.white)),
+                      ],
+                    )),
+                    IconButton(
+                      tooltip: 'Dismiss notification',
+                      onPressed: _dismissResidentBanner,
+                      icon: const Icon(Icons.close, color: Colors.white),
+                    ),
+                  ]),
+                ),
+              ),
+            ),
+          )),
+        ),
+      );
+      _activeResidentBanner = entry;
+      overlay.insert(entry);
+      _residentBannerTimer = Timer(
+          const Duration(seconds: 6), _dismissResidentBanner);
+    });
+  }
+
+  @override
+  void dispose() {
+    _dismissResidentBanner();
+    _residentNotifications.dispose();
+    super.dispose();
+  }
 
   // Did the user submit our dummy report?
   bool newReportSubmitted = false;
@@ -212,6 +306,8 @@ class _MainScreenState extends State<MainScreen> {
         newReportSubmitted = true;
         currentIndex = 0;
       });
+      // Show the submission confirmation AFTER Camera closes.
+      _residentNotifications.reportSubmitted();
     }
   }
 
@@ -224,7 +320,19 @@ class _MainScreenState extends State<MainScreen> {
     return Scaffold(
       extendBody: true,
 
-      body: pages[currentIndex],
+      body: Stack(
+        children: [
+          Positioned.fill(child: pages[currentIndex]),
+          // One consistent, functioning notification bell on the three
+          // Resident tabs. Do not show it on the Profile page.
+          if (currentIndex >= 0 && currentIndex <= 2)
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 17,
+              right: 20,
+              child: ResidentNotificationBell(center: _residentNotifications),
+            ),
+        ],
+      ),
 
       // ======================================================
       // CAMERA BUTTON

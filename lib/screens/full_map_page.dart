@@ -107,14 +107,14 @@ class _FullMapPageState extends State<FullMapPage> with WidgetsBindingObserver {
     );
   }
 
-  // Firestore won't send an event simply because two hours have elapsed.
+  // Firestore won't send an event simply because 30 seconds have elapsed.
   // The local timer repaints this map at the display deadline.
   void _scheduleMarkerExpiry(ZoneDCloudReport report) {
     _resolvedMarkerExpiry?.cancel();
     _resolvedMarkerExpiry = null;
     if (!report.resolved || report.resolvedAt == null) return;
 
-    final deadline = report.resolvedAt!.add(const Duration(hours: 2));
+    final deadline = report.resolvedAt!.add(const Duration(seconds: 30));
     final remaining = deadline.difference(DateTime.now());
     if (remaining <= Duration.zero) return;
 
@@ -417,9 +417,9 @@ class _FullMapPageState extends State<FullMapPage> with WidgetsBindingObserver {
                   // Red marker
                   //
                   // RESOLVED:
-                  // Green marker for 2 hours
+                  // Green marker for 30 seconds
                   //
-                  // AFTER 2 HOURS:
+                  // AFTER 30 SECONDS:
                   // Hidden from resident map
                   // ==================================================
                   if (zoneDVisible)
@@ -592,7 +592,7 @@ class _FullMapPageState extends State<FullMapPage> with WidgetsBindingObserver {
           : Colors.red,
 
       additionalInfo: zoneDResolved
-          ? 'This hotspot has been resolved. It will remain visible to residents for 2 hours before being removed from the active map.'
+          ? 'This hotspot has been resolved. It will remain visible to residents for 30 seconds before being removed from the active map.'
           : zoneDReportCount == 1
           ? 'This is a newly detected public waste hotspot.'
           : '$zoneDReportCount unique residents have confirmed this same waste hotspot. Their reports have been merged into one case.',

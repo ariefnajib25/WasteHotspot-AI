@@ -81,10 +81,10 @@ class ZoneDCloudReport {
       ((resolved && reportedBy(uid)) ? 1 : 0) +
       history.where((e) => e.reportedBy(uid)).length;
 
-  /// Server security rules, not this client clock, enforce the two-hour limit.
+  /// Server security rules, not this client clock, enforce the 30-second limit.
   bool get canStartNewIncident =>
       resolved && (demoUnlocked || (resolvedAt != null &&
-      !DateTime.now().isBefore(resolvedAt!.add(const Duration(hours: 2)))));
+      !DateTime.now().isBefore(resolvedAt!.add(const Duration(seconds: 30)))));
 
   bool get visibleOnResidentMap => confirmations > 0 &&
       (!resolved || (resolvedAt != null && !canStartNewIncident));
@@ -186,9 +186,11 @@ class ZoneDCloudService {
 
   /// HACKATHON DEMO ONLY.
   /// The FIRST resident who created a resolved incident can simulate that
-  /// the 2-hour cooldown has elapsed. This updates a controlled flag in
+  /// the 30-second cooldown has elapsed. This updates a controlled flag in
   /// Firestore; it does not alter the real resolvedAt timestamp or history.
   /// Firestore Security Rules enforce the role, ownership and allowed fields.
+  // Legacy API name retained for compatibility with older Resident pages.
+  // This now simulates a 30-second wait, not two hours.
   static Future<void> simulateTwoHoursLater() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -199,7 +201,7 @@ class ZoneDCloudService {
       final snapshot = await transaction.get(_zoneD);
       final data = snapshot.data();
       if (data == null || data['resolved'] != true) {
-        throw StateError('Zone D must be resolved before simulating 2 hours.');
+        throw StateError('Zone D must be resolved before simulating 30 seconds.');
       }
       if (data['firstReporterUid'] != user.uid) {
         throw StateError(
@@ -264,9 +266,9 @@ class ZoneDCloudService {
             throw StateError('Resolved time is missing. Contact Admin.');
           }
           final allowedAt =
-              oldResolvedAt.toDate().add(const Duration(hours: 2));
+              oldResolvedAt.toDate().add(const Duration(seconds: 30));
           if (DateTime.now().isBefore(allowedAt) && data['demoUnlocked'] != true) {
-            throw StateError('Zone D is resolved. Wait 2 real hours, or use Simulate 2 Hours Later in Progress.');
+            throw StateError('Zone D is resolved. Wait 30 real seconds, or use Simulate 30 Seconds Later in Progress.');
           }
 
           final history = List<dynamic>.from(data['history'] ?? <dynamic>[]);

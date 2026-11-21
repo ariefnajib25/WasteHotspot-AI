@@ -29,9 +29,10 @@ class _ProgressPageState extends State<ProgressPage> {
   String? _firestoreError;
   bool _loading = true;
   bool _simulatingTwoHours = false;
+  Timer? _cooldownExpiryTimer;
   bool _simulatingNextDay = false;
   bool get _previewTwoHoursLater =>
-      (_zoneD?.demoUnlocked ?? false) || ZoneDDemoPreview.isMarkerHidden(_zoneD);
+      (_zoneD?.canStartNewIncident ?? false) || ZoneDDemoPreview.isMarkerHidden(_zoneD);
 
   @override
   void initState() {
@@ -69,6 +70,7 @@ class _ProgressPageState extends State<ProgressPage> {
           _firestoreError = null;
           _loading = false;
         });
+        _scheduleCooldownExpiry(report);
       },
       onError: (Object error) {
         if (!mounted) return;
@@ -80,8 +82,27 @@ class _ProgressPageState extends State<ProgressPage> {
     );
   }
 
+  // Update the progress UI when the real 30-second cooldown expires.
+  // Firestore does not broadcast a new snapshot just because time passed.
+  void _scheduleCooldownExpiry(ZoneDCloudReport report) {
+    _cooldownExpiryTimer?.cancel();
+    _cooldownExpiryTimer = null;
+    if (!report.resolved || report.resolvedAt == null ||
+        report.canStartNewIncident) return;
+
+    final deadline = report.resolvedAt!.add(const Duration(seconds: 30));
+    final remaining = deadline.difference(DateTime.now());
+    if (remaining <= Duration.zero) return;
+
+    _cooldownExpiryTimer = Timer(
+      remaining + const Duration(milliseconds: 120),
+      () { if (mounted) setState(() {}); },
+    );
+  }
+
   @override
   void dispose() {
+    _cooldownExpiryTimer?.cancel();
     _zoneDSubscription.cancel();
     super.dispose();
   }
@@ -245,7 +266,7 @@ class _ProgressPageState extends State<ProgressPage> {
         const SnackBar(
           backgroundColor: Color(0xFF16875B),
           content: Text(
-            '2 hours simulated in Firebase! Zone D is hidden from maps. '
+            '30 seconds simulated in Firebase! Zone D is hidden from maps. '
             'You can now create a NEW report using Camera.',
           ),
         ),
@@ -253,7 +274,7 @@ class _ProgressPageState extends State<ProgressPage> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not simulate 2 hours: $error')),
+        SnackBar(content: Text('Could not simulate 30 seconds: $error')),
       );
     } finally {
       if (mounted) setState(() => _simulatingTwoHours = false);
@@ -833,7 +854,7 @@ class _ProgressPageState extends State<ProgressPage> {
                         SizedBox(height: 4),
 
                         Text(
-                          'This waste report is complete and remains in your history. Automatic 2-hour map removal is not yet linked to Firebase.',
+                          'This waste report is complete and remains in your history. The resolved marker disappears after 30 seconds, or immediately when you use the demo button.',
                           style: TextStyle(
                             color: Colors.black54,
                             fontSize: 11,
@@ -937,7 +958,7 @@ class _ProgressPageState extends State<ProgressPage> {
 
           Text(
             isResolved
-                ? 'Tap below to simulate 2 hours in Firebase. The resolved marker disappears from both maps and the Camera allows a NEW Zone D report. Completed history stays saved. Only the first reporting Resident can run this demo.'
+                ? 'After resolution, the marker disappears automatically in 30 seconds. For the demo, the first reporting Resident can tap below to skip the wait. A NEW Zone D report can then be submitted, and completed history stays saved.'
                 : 'Tap Simulate Next Day to advance the shared Firebase demo day. Admin will receive an in-app alert automatically. Day 2 triggers a MANAGEMENT ALERT and Day 3 becomes URGENT. Only Admin can resolve the report.',
             style: const TextStyle(
               color: Colors.black54,
@@ -1048,7 +1069,7 @@ class _ProgressPageState extends State<ProgressPage> {
                       ? 'New Report Unlocked'
                       : _simulatingTwoHours
                           ? 'Updating Firebase...'
-                          : 'Simulate 2 Hours Later',
+                          : 'Simulate 30 Seconds Later',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
               ),

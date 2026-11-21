@@ -5,7 +5,7 @@ import 'zone_d_cloud_service.dart';
 /// A SAFE hackathon-only presentation override.
 /// It hides a resolved incident from maps in this running Resident app.
 /// It does not change Firestore, the actual resolvedAt timestamp, or
-/// the two-hour server-side restriction on starting a new case.
+/// the 30-second server-side restriction on starting a new case.
 class ZoneDDemoPreview {
   ZoneDDemoPreview._();
 
@@ -13,6 +13,7 @@ class ZoneDDemoPreview {
   static final ValueNotifier<String?> hiddenResolvedIncidentId =
       ValueNotifier<String?>(null);
 
+  // Legacy API name retained for compatibility. Simulates 30 seconds.
   static void simulateTwoHoursLater(ZoneDCloudReport report) {
     if (!report.resolved || report.incidentId.isEmpty) return;
     hiddenResolvedIncidentId.value = report.incidentId;

@@ -115,14 +115,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  // Firestore does not emit a change merely because 2 hours elapsed.
+  // Firestore does not emit a change merely because 30 seconds elapsed.
   // Schedule a local repaint when a resolved marker should disappear.
   void _scheduleMarkerExpiry(ZoneDCloudReport report) {
     _resolvedMarkerExpiry?.cancel();
     _resolvedMarkerExpiry = null;
     if (!report.resolved || report.resolvedAt == null) return;
 
-    final expiresAt = report.resolvedAt!.add(const Duration(hours: 2));
+    final expiresAt = report.resolvedAt!.add(const Duration(seconds: 30));
     final remaining = expiresAt.difference(DateTime.now());
     if (remaining <= Duration.zero) return;
 
@@ -196,18 +196,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                     ),
                   ),
 
-                  Container(
-                    width: 45,
-                    height: 45,
-                    decoration: const BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.notifications_none,
-                      color: Color(0xFF16875B),
-                    ),
-                  ),
+                  // Notification bell is positioned here by MainScreen.
+                  // This spacer prevents the title from overlapping it.
+                  const SizedBox(width: 50, height: 45),
                 ],
               ),
 
